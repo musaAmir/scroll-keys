@@ -66,4 +66,4 @@ Open the settings page to configure:
 
 ## License
 
-Feel free to use and modify as you wish!
+MIT
