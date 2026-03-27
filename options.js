@@ -61,7 +61,7 @@ function saveSettings() {
   };
 
   // Validate that keys are different
-  if (settings.scrollDownKey === settings.scrollUpKey) {
+  if (normalizeKey(settings.scrollDownKey) === normalizeKey(settings.scrollUpKey)) {
     showStatus('Scroll up and down keys must be different!', 'error');
     return;
   }
@@ -73,13 +73,16 @@ function saveSettings() {
   }
 
   // Validate scroll duration
-  if (settings.scrollDuration < 50 || settings.scrollDuration > 500) {
+  if (settings.smoothScroll && (settings.scrollDuration < 50 || settings.scrollDuration > 500)) {
     showStatus('Scroll duration must be between 50 and 500 milliseconds!', 'error');
     return;
   }
 
   // Validate acceleration multiplier
-  if (settings.accelerationMultiplier < 1.5 || settings.accelerationMultiplier > 10) {
+  if (
+    settings.enableAcceleration &&
+    (settings.accelerationMultiplier < 1.5 || settings.accelerationMultiplier > 10)
+  ) {
     showStatus('Acceleration multiplier must be between 1.5 and 10!', 'error');
     return;
   }
@@ -120,9 +123,21 @@ function showStatus(message, type) {
 // Handle key input (allow only single characters)
 function handleKeyInput(input) {
   input.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      return;
+    }
+
     e.preventDefault();
 
-    // Get the key value
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      input.value = '';
+      return;
+    }
+
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Escape'].includes(e.key)) {
+      return;
+    }
+
     let key = e.key;
 
     // Handle special keys

@@ -2,6 +2,20 @@ let settings = { ...DEFAULT_SETTINGS };
 
 // Track the current smooth scroll animation so we can cancel it
 let currentAnimation = null;
+const TEXT_INPUT_TYPES = new Set([
+  'text',
+  'password',
+  'email',
+  'search',
+  'tel',
+  'url',
+  'number',
+  'date',
+  'datetime-local',
+  'time',
+  'week',
+  'month'
+]);
 
 // Load settings from storage
 chrome.storage.sync.get(DEFAULT_SETTINGS, (result) => {
@@ -17,56 +31,61 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
-// Normalise key values so options (e.g. arrow symbols) match event.key
-function normalizeKey(key) {
-  if (!key) return '';
-
-  const lower = key.toLowerCase();
-
-  switch (lower) {
-    case 'arrowup':
-    case '↑':
-      return 'arrowup';
-    case 'arrowdown':
-    case '↓':
-      return 'arrowdown';
-    case 'arrowleft':
-    case '←':
-      return 'arrowleft';
-    case 'arrowright':
-    case '→':
-      return 'arrowright';
-    case ' ':
-    case 'space':
-    case 'spacebar':
-      return 'space';
-    default:
-      return lower;
-  }
-}
-
 // Easing function for smooth scrolling (ease-out quad)
 function easeOutQuad(t) {
   return t * (2 - t);
 }
 
+function getElementFromNode(node) {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    return node;
+  }
+
+  return node.parentElement || null;
+}
+
+function getParentElement(element) {
+  if (!element) return null;
+  if (element.parentElement) {
+    return element.parentElement;
+  }
+
+  const root = element.getRootNode ? element.getRootNode() : null;
+  if (root instanceof ShadowRoot) {
+    return root.host;
+  }
+
+  return null;
+}
+
+function getActiveElement(root = document) {
+  let activeElement = root.activeElement || null;
+
+  while (activeElement && activeElement.shadowRoot && activeElement.shadowRoot.activeElement) {
+    activeElement = activeElement.shadowRoot.activeElement;
+  }
+
+  return activeElement;
+}
+
 // Find the appropriate element to scroll.
 // Prefer the nearest scrollable ancestor of the event target, fall back to the page.
 function getScrollTarget(startElement) {
-  let el = startElement;
+  let el = getElementFromNode(startElement);
 
   while (el && el !== document.body && el !== document.documentElement) {
     const style = window.getComputedStyle(el);
     const overflowY = style.overflowY;
     const canScroll =
-      (overflowY === 'auto' || overflowY === 'scroll') &&
+      (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
       el.scrollHeight > el.clientHeight + 1;
 
     if (canScroll) {
       return el;
     }
 
-    el = el.parentElement;
+    el = getParentElement(el);
   }
 
   const scrollingElement = document.scrollingElement || document.documentElement || document.body;
@@ -128,34 +147,36 @@ function smoothScrollBy(target, distance, duration) {
 
 // Check if the current element is an input field or editable content
 function isInputField(element) {
-  if (!element) return false;
-
-  const tagName = element.tagName.toLowerCase();
-  const inputTypes = ['text', 'password', 'email', 'search', 'tel', 'url', 'number', 'date', 'datetime-local', 'time', 'week', 'month'];
-
-  // Check if it's a standard input element
-  if (tagName === 'textarea' || tagName === 'select') {
-    return true;
-  }
-
-  if (tagName === 'input' && inputTypes.includes(element.type)) {
-    return true;
-  }
-
-  // Check if the element is contentEditable
-  if (element.isContentEditable) {
-    return true;
-  }
-
-  // Check for ARIA textbox role (used by many modern web apps including Reddit)
-  const role = element.getAttribute('role');
-  if (role === 'textbox' || role === 'searchbox') {
-    return true;
-  }
-
-  // Check if document is in design mode (some rich text editors)
   if (document.designMode === 'on') {
     return true;
+  }
+
+  let currentElement = getElementFromNode(element);
+
+  while (currentElement) {
+    const tagName = currentElement.tagName ? currentElement.tagName.toLowerCase() : '';
+
+    if (tagName === 'textarea' || tagName === 'select') {
+      return true;
+    }
+
+    if (tagName === 'input') {
+      const inputType = (currentElement.type || 'text').toLowerCase();
+      if (!inputType || TEXT_INPUT_TYPES.has(inputType)) {
+        return true;
+      }
+    }
+
+    if (currentElement.isContentEditable) {
+      return true;
+    }
+
+    const role = currentElement.getAttribute ? currentElement.getAttribute('role') : null;
+    if (role === 'textbox' || role === 'searchbox') {
+      return true;
+    }
+
+    currentElement = getParentElement(currentElement);
   }
 
   return false;
@@ -165,10 +186,12 @@ function isInputField(element) {
 document.addEventListener(
   'keydown',
   (event) => {
+    const eventOrigin = event.composedPath ? event.composedPath()[0] : event.target;
+
     // Don't trigger if user is typing in an input field
     // Check both event.target and the currently focused element (activeElement)
     // because some sites wrap inputs in containers that receive the event first
-    if (isInputField(event.target) || isInputField(document.activeElement)) {
+    if (isInputField(eventOrigin) || isInputField(getActiveElement())) {
       return;
     }
 
@@ -184,37 +207,17 @@ document.addEventListener(
       return;
     }
 
-    // Check which modifier keys are pressed
-    const hasShift = event.shiftKey;
-    const hasCtrl = event.ctrlKey;
-    const hasAlt = event.altKey;
-    const hasMeta = event.metaKey;
-
-    // Determine if acceleration modifier is pressed
-    let isAccelerationActive = false;
-    if (settings.enableAcceleration) {
-      switch (settings.accelerationModifier) {
-        case 'shift':
-          isAccelerationActive = hasShift;
-          break;
-        case 'ctrl':
-          isAccelerationActive = hasCtrl;
-          break;
-        case 'alt':
-          isAccelerationActive = hasAlt;
-          break;
-        case 'meta':
-          isAccelerationActive = hasMeta;
-          break;
-      }
-    }
-
-    // Check if non-acceleration modifier keys are pressed
-    const hasOtherModifiers =
-      (settings.accelerationModifier !== 'shift' && hasShift) ||
-      (settings.accelerationModifier !== 'ctrl' && hasCtrl) ||
-      (settings.accelerationModifier !== 'alt' && hasAlt) ||
-      (settings.accelerationModifier !== 'meta' && hasMeta);
+    const modifierState = {
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey,
+      alt: event.altKey,
+      meta: event.metaKey
+    };
+    const accelerationModifier = settings.enableAcceleration ? settings.accelerationModifier : null;
+    const isAccelerationActive = accelerationModifier ? Boolean(modifierState[accelerationModifier]) : false;
+    const hasOtherModifiers = Object.entries(modifierState).some(
+      ([modifier, isPressed]) => isPressed && modifier !== accelerationModifier
+    );
 
     // Don't trigger if other modifier keys are pressed (to avoid conflicts with browser shortcuts)
     if (hasOtherModifiers) {
@@ -232,7 +235,7 @@ document.addEventListener(
     const direction = isScrollDown ? 1 : -1;
     const finalDistance = scrollDistance * direction;
 
-    const target = getScrollTarget(event.target);
+    const target = getScrollTarget(eventOrigin);
 
     // Use custom smooth scroll or instant scroll based on settings
     if (settings.smoothScroll) {
