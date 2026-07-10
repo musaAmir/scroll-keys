@@ -15,33 +15,38 @@ const status = document.getElementById('status');
 
 // Toggle acceleration settings visibility
 function toggleAccelerationSettings() {
-  if (enableAccelerationCheckbox.checked) {
-    accelerationSettingsDiv.classList.remove('disabled');
-  } else {
-    accelerationSettingsDiv.classList.add('disabled');
-  }
+  const isEnabled = enableAccelerationCheckbox.checked;
+  accelerationSettingsDiv.classList.toggle('disabled', !isEnabled);
+  accelerationSettingsDiv.setAttribute('aria-disabled', String(!isEnabled));
+  accelerationModifierSelect.disabled = !isEnabled;
+  accelerationMultiplierInput.disabled = !isEnabled;
 }
 
 // Toggle scroll duration setting visibility
 function toggleScrollDurationSetting() {
-  if (smoothScrollCheckbox.checked) {
-    scrollDurationSettingDiv.classList.remove('disabled');
-  } else {
-    scrollDurationSettingDiv.classList.add('disabled');
-  }
+  const isEnabled = smoothScrollCheckbox.checked;
+  scrollDurationSettingDiv.classList.toggle('disabled', !isEnabled);
+  scrollDurationSettingDiv.setAttribute('aria-disabled', String(!isEnabled));
+  scrollDurationInput.disabled = !isEnabled;
 }
 
 // Load saved settings
 function loadSettings() {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (result) => {
-    scrollDownKeyInput.value = result.scrollDownKey;
-    scrollUpKeyInput.value = result.scrollUpKey;
-    scrollAmountInput.value = result.scrollAmount;
-    smoothScrollCheckbox.checked = result.smoothScroll;
-    scrollDurationInput.value = result.scrollDuration;
-    enableAccelerationCheckbox.checked = result.enableAcceleration;
-    accelerationModifierSelect.value = result.accelerationModifier;
-    accelerationMultiplierInput.value = result.accelerationMultiplier;
+    if (chrome.runtime.lastError) {
+      showStatus(`Could not load settings: ${chrome.runtime.lastError.message}`, 'error');
+      return;
+    }
+
+    const settings = sanitizeSettings(result);
+    scrollDownKeyInput.value = settings.scrollDownKey;
+    scrollUpKeyInput.value = settings.scrollUpKey;
+    scrollAmountInput.value = settings.scrollAmount;
+    smoothScrollCheckbox.checked = settings.smoothScroll;
+    scrollDurationInput.value = settings.scrollDuration;
+    enableAccelerationCheckbox.checked = settings.enableAcceleration;
+    accelerationModifierSelect.value = settings.accelerationModifier;
+    accelerationMultiplierInput.value = settings.accelerationMultiplier;
     toggleAccelerationSettings();
     toggleScrollDurationSetting();
   });
@@ -49,15 +54,28 @@ function loadSettings() {
 
 // Save settings
 function saveSettings() {
+  const scrollDownKey = scrollDownKeyInput.value;
+  const scrollUpKey = scrollUpKeyInput.value;
+
+  if (!scrollDownKey || !scrollUpKey) {
+    showStatus('Scroll up and down keys cannot be empty!', 'error');
+    return;
+  }
+
+  if (!isSupportedScrollKey(scrollDownKey) || !isSupportedScrollKey(scrollUpKey)) {
+    showStatus('Choose a single character, arrow key, or Space for each shortcut.', 'error');
+    return;
+  }
+
   const settings = {
-    scrollDownKey: scrollDownKeyInput.value || DEFAULT_SETTINGS.scrollDownKey,
-    scrollUpKey: scrollUpKeyInput.value || DEFAULT_SETTINGS.scrollUpKey,
-    scrollAmount: parseInt(scrollAmountInput.value) || DEFAULT_SETTINGS.scrollAmount,
+    scrollDownKey,
+    scrollUpKey,
+    scrollAmount: Number(scrollAmountInput.value),
     smoothScroll: smoothScrollCheckbox.checked,
-    scrollDuration: parseInt(scrollDurationInput.value) || DEFAULT_SETTINGS.scrollDuration,
+    scrollDuration: Number(scrollDurationInput.value),
     enableAcceleration: enableAccelerationCheckbox.checked,
     accelerationModifier: accelerationModifierSelect.value,
-    accelerationMultiplier: parseFloat(accelerationMultiplierInput.value) || DEFAULT_SETTINGS.accelerationMultiplier
+    accelerationMultiplier: Number(accelerationMultiplierInput.value)
   };
 
   // Validate that keys are different
@@ -67,13 +85,16 @@ function saveSettings() {
   }
 
   // Validate scroll amount
-  if (settings.scrollAmount < 10 || settings.scrollAmount > 1000) {
+  if (!Number.isFinite(settings.scrollAmount) || settings.scrollAmount < 10 || settings.scrollAmount > 1000) {
     showStatus('Scroll amount must be between 10 and 1000 pixels!', 'error');
     return;
   }
 
   // Validate scroll duration
-  if (settings.smoothScroll && (settings.scrollDuration < 50 || settings.scrollDuration > 500)) {
+  if (
+    settings.smoothScroll &&
+    (!Number.isFinite(settings.scrollDuration) || settings.scrollDuration < 50 || settings.scrollDuration > 500)
+  ) {
     showStatus('Scroll duration must be between 50 and 500 milliseconds!', 'error');
     return;
   }
@@ -81,13 +102,36 @@ function saveSettings() {
   // Validate acceleration multiplier
   if (
     settings.enableAcceleration &&
-    (settings.accelerationMultiplier < 1.5 || settings.accelerationMultiplier > 10)
+    (!Number.isFinite(settings.accelerationMultiplier) ||
+      settings.accelerationMultiplier < 1.5 ||
+      settings.accelerationMultiplier > 10)
   ) {
     showStatus('Acceleration multiplier must be between 1.5 and 10!', 'error');
     return;
   }
 
+  // Keep inactive settings valid so re-enabling a feature never exposes a
+  // malformed synchronized value.
+  if (
+    !settings.smoothScroll &&
+    (!Number.isFinite(settings.scrollDuration) || settings.scrollDuration < 50 || settings.scrollDuration > 500)
+  ) {
+    settings.scrollDuration = DEFAULT_SETTINGS.scrollDuration;
+  }
+  if (
+    !settings.enableAcceleration &&
+    (!Number.isFinite(settings.accelerationMultiplier) ||
+      settings.accelerationMultiplier < 1.5 ||
+      settings.accelerationMultiplier > 10)
+  ) {
+    settings.accelerationMultiplier = DEFAULT_SETTINGS.accelerationMultiplier;
+  }
+
   chrome.storage.sync.set(settings, () => {
+    if (chrome.runtime.lastError) {
+      showStatus(`Could not save settings: ${chrome.runtime.lastError.message}`, 'error');
+      return;
+    }
     showStatus('Settings saved successfully!', 'success');
   });
 }
@@ -106,6 +150,10 @@ function resetSettings() {
   toggleScrollDurationSetting();
 
   chrome.storage.sync.set(DEFAULT_SETTINGS, () => {
+    if (chrome.runtime.lastError) {
+      showStatus(`Could not reset settings: ${chrome.runtime.lastError.message}`, 'error');
+      return;
+    }
     showStatus('Settings reset to default!', 'success');
   });
 }

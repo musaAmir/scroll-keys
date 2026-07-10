@@ -2,32 +2,37 @@ let settings = { ...DEFAULT_SETTINGS };
 
 // Track the current smooth scroll animation so we can cancel it
 let currentAnimation = null;
-const TEXT_INPUT_TYPES = new Set([
-  'text',
-  'password',
-  'email',
-  'search',
-  'tel',
-  'url',
-  'number',
-  'date',
-  'datetime-local',
-  'time',
-  'week',
-  'month'
+const INTERACTIVE_ROLES = new Set([
+  'button',
+  'checkbox',
+  'combobox',
+  'radio',
+  'searchbox',
+  'slider',
+  'spinbutton',
+  'switch',
+  'textbox'
 ]);
 
 // Load settings from storage
 chrome.storage.sync.get(DEFAULT_SETTINGS, (result) => {
-  settings = result;
+  if (chrome.runtime.lastError) {
+    return;
+  }
+
+  settings = sanitizeSettings(result);
 });
 
 // Listen for settings updates
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync') {
+    const updatedSettings = { ...settings };
     for (const key in changes) {
-      settings[key] = changes[key].newValue;
+      if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) {
+        updatedSettings[key] = changes[key].newValue;
+      }
     }
+    settings = sanitizeSettings(updatedSettings);
   }
 });
 
@@ -101,8 +106,8 @@ function getScrollTarget(startElement) {
 // Works for both window and scrollable elements, and does not try to "guess"
 // when we've hit the bottom – it just runs the animation for the duration.
 function smoothScrollBy(target, distance, duration) {
-  if (currentAnimation) {
-    cancelAnimationFrame(currentAnimation.id);
+  if (currentAnimation !== null) {
+    cancelAnimationFrame(currentAnimation);
     currentAnimation = null;
   }
 
@@ -130,23 +135,17 @@ function smoothScrollBy(target, distance, duration) {
     }
 
     if (progress < 1) {
-      currentAnimation = {
-        id: requestAnimationFrame(step),
-        target
-      };
+      currentAnimation = requestAnimationFrame(step);
     } else {
       currentAnimation = null;
     }
   }
 
-  currentAnimation = {
-    id: requestAnimationFrame(step),
-    target
-  };
+  currentAnimation = requestAnimationFrame(step);
 }
 
-// Check if the current element is an input field or editable content
-function isInputField(element) {
+// Check whether keyboard input should remain under the page's control.
+function isInteractiveElement(element) {
   if (document.designMode === 'on') {
     return true;
   }
@@ -156,13 +155,13 @@ function isInputField(element) {
   while (currentElement) {
     const tagName = currentElement.tagName ? currentElement.tagName.toLowerCase() : '';
 
-    if (tagName === 'textarea' || tagName === 'select') {
+    if (tagName === 'textarea' || tagName === 'select' || tagName === 'button' || tagName === 'summary') {
       return true;
     }
 
     if (tagName === 'input') {
       const inputType = (currentElement.type || 'text').toLowerCase();
-      if (!inputType || TEXT_INPUT_TYPES.has(inputType)) {
+      if (inputType !== 'hidden') {
         return true;
       }
     }
@@ -171,8 +170,9 @@ function isInputField(element) {
       return true;
     }
 
-    const role = currentElement.getAttribute ? currentElement.getAttribute('role') : null;
-    if (role === 'textbox' || role === 'searchbox') {
+    const roleAttribute = currentElement.getAttribute ? currentElement.getAttribute('role') : '';
+    const role = roleAttribute ? roleAttribute.trim().split(/\s+/)[0].toLowerCase() : '';
+    if (INTERACTIVE_ROLES.has(role)) {
       return true;
     }
 
@@ -188,10 +188,10 @@ document.addEventListener(
   (event) => {
     const eventOrigin = event.composedPath ? event.composedPath()[0] : event.target;
 
-    // Don't trigger if user is typing in an input field
+    // Don't trigger while the user is interacting with a form control or editor.
     // Check both event.target and the currently focused element (activeElement)
     // because some sites wrap inputs in containers that receive the event first
-    if (isInputField(eventOrigin) || isInputField(getActiveElement())) {
+    if (isInteractiveElement(eventOrigin) || isInteractiveElement(getActiveElement())) {
       return;
     }
 
@@ -226,6 +226,7 @@ document.addEventListener(
 
     // Prevent default behavior and stop all event propagation immediately
     event.preventDefault();
+    event.stopImmediatePropagation();
 
     // Calculate scroll amount with acceleration if active
     const scrollMultiplier = isAccelerationActive ? settings.accelerationMultiplier : 1;

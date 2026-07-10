@@ -30,6 +30,10 @@ Keyboard Scroller runs a content script on web pages so it can detect configured
 
 Keyboard Scroller does not load or execute remotely hosted code. All extension code is included in the installed extension package.
 
+## Limited Use
+
+The use of information received from Google APIs will adhere to the Chrome Web Store User Data Policy, including the Limited Use requirements.
+
 ## Third Parties
 
 Keyboard Scroller does not use third-party analytics, advertising, tracking, or external services.

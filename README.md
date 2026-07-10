@@ -25,7 +25,11 @@ A simple and elegant browser extension that lets you scroll through websites usi
 
 ## Installation
 
-### Chrome / Edge / Brave
+### Chrome Web Store
+
+[Install Keyboard Scroller from the Chrome Web Store](https://chromewebstore.google.com/detail/keyboard-scroller/fnebfedijmclenclpnbmpfaioblknggg).
+
+### Load unpacked for development
 
 1. Open your browser and navigate to:
    - Chrome: `chrome://extensions/`
@@ -63,6 +67,10 @@ Open the settings page to configure:
 - Pure JavaScript (no frameworks)
 - Chrome Extension Manifest V3
 - Chrome Storage API
+
+## Release packaging
+
+Run `./scripts/package.sh`. The script validates the manifest and JavaScript, runs the tests, and creates a versioned upload ZIP in `dist/` with `manifest.json` at its root.
 
 ## License
 
